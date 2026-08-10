@@ -91,5 +91,6 @@ function akai_bootstrap() {
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-settings.php';
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-factory.php';
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-keyword-writer.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-logger.php';
 }
 add_action( 'plugins_loaded', 'akai_bootstrap' );
