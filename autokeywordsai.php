@@ -84,6 +84,11 @@ function akai_bootstrap() {
 		return;
 	}
 
-	// Requires are added by later tasks as each class lands.
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-prompt.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/interface-akai-provider.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-gemini.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-openai.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-settings.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-factory.php';
 }
 add_action( 'plugins_loaded', 'akai_bootstrap' );
