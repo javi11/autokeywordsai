@@ -143,6 +143,127 @@ if ( ! class_exists( 'WP_Error' ) ) {
 	}
 }
 
+// --- Option storage stub -----------------------------------------------------
+$GLOBALS['akai_options'] = array();
+
+if ( ! function_exists( 'get_option' ) ) {
+	/**
+	 * In-memory get_option stub.
+	 *
+	 * @param string $name    Option name.
+	 * @param mixed  $default Default when unset.
+	 * @return mixed
+	 */
+	function get_option( $name, $default = false ) {
+		return array_key_exists( $name, $GLOBALS['akai_options'] ) ? $GLOBALS['akai_options'][ $name ] : $default;
+	}
+}
+
+if ( ! function_exists( 'update_option' ) ) {
+	/**
+	 * In-memory update_option stub.
+	 *
+	 * @param string $name  Option name.
+	 * @param mixed  $value Option value.
+	 * @param mixed  $autoload Ignored.
+	 * @return bool
+	 */
+	function update_option( $name, $value, $autoload = null ) {
+		$GLOBALS['akai_options'][ $name ] = $value;
+		return true;
+	}
+}
+
+// --- Action Scheduler stub ---------------------------------------------------
+/*
+ * This fake reproduces the one Action Scheduler behaviour the retry policy depends on:
+ * with $unique = true it REFUSES to schedule (returning 0) when an action with the same
+ * hook, args and group is already pending *or in-progress*. The in-progress half is the
+ * subtle one — a callback that reschedules itself with unchanged args is silently ignored,
+ * because its own action is in-progress while it runs. Verified against Action Scheduler
+ * 3.x on a live install.
+ */
+$GLOBALS['akai_actions'] = array();
+
+/**
+ * Clears the fake scheduler between test groups.
+ *
+ * @return void
+ */
+function akai_fake_scheduler_reset(): void {
+	$GLOBALS['akai_actions'] = array();
+}
+
+/**
+ * Registers an action already claimed and executing, as Action Scheduler holds the action
+ * whose callback is currently running.
+ *
+ * @param string $hook  Hook name.
+ * @param array  $args  Action args.
+ * @param string $group Action group.
+ * @return void
+ */
+function akai_fake_scheduler_add_in_progress( string $hook, array $args, string $group ): void {
+	$GLOBALS['akai_actions'][] = array(
+		'hook'      => $hook,
+		'args'      => $args,
+		'group'     => $group,
+		'timestamp' => time(),
+		'status'    => 'in-progress',
+	);
+}
+
+/**
+ * The pending actions the fake scheduler holds.
+ *
+ * @return array<int, array>
+ */
+function akai_fake_scheduler_pending(): array {
+	return array_values(
+		array_filter(
+			$GLOBALS['akai_actions'],
+			static function ( $action ) {
+				return 'pending' === $action['status'];
+			}
+		)
+	);
+}
+
+if ( ! function_exists( 'as_schedule_single_action' ) ) {
+	/**
+	 * Action Scheduler stub honouring the real uniqueness rule.
+	 *
+	 * @param int    $timestamp When to run.
+	 * @param string $hook      Hook name.
+	 * @param array  $args      Action args.
+	 * @param string $group     Action group.
+	 * @param bool   $unique    Whether to refuse duplicates.
+	 * @return int Action id, or 0 when refused.
+	 */
+	function as_schedule_single_action( $timestamp, $hook, $args = array(), $group = '', $unique = false ) {
+		if ( $unique ) {
+			foreach ( $GLOBALS['akai_actions'] as $action ) {
+				if ( $action['hook'] === $hook
+					&& $action['args'] === $args
+					&& $action['group'] === $group
+					&& in_array( $action['status'], array( 'pending', 'in-progress' ), true ) ) {
+					return 0;
+				}
+			}
+		}
+
+		$GLOBALS['akai_actions'][] = array(
+			'hook'      => $hook,
+			'args'      => $args,
+			'group'     => $group,
+			'timestamp' => (int) $timestamp,
+			'status'    => 'pending',
+		);
+
+		return count( $GLOBALS['akai_actions'] );
+	}
+}
+
 // --- Assertion helpers -------------------------------------------------------
 /**
  * Asserts strict equality and reports a pass/fail line.

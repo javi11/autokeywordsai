@@ -5,7 +5,23 @@
  * @package autokeywordsai
  */
 
+require_once dirname( __DIR__ ) . '/includes/class-akai-logger.php';
 require_once dirname( __DIR__ ) . '/includes/class-akai-queue.php';
+
+/**
+ * Invokes AKAI_Queue::handle_failure, which is private because nothing outside the class
+ * may apply the retry policy.
+ *
+ * @param int      $product_id Product post ID.
+ * @param int      $attempt    Attempt number.
+ * @param WP_Error $error      The failure.
+ * @return void
+ */
+function akai_invoke_handle_failure( int $product_id, int $attempt, WP_Error $error ): void {
+	// No setAccessible() call: it has been a no-op since PHP 8.1 and the plugin requires 8.1+.
+	$method = new ReflectionMethod( 'AKAI_Queue', 'handle_failure' );
+	$method->invoke( null, $product_id, $attempt, $error );
+}
 
 // --- Stagger maths ----------------------------------------------------------
 // At 10 rpm the spacing is 6 seconds, so the Nth product runs 6N seconds out.
@@ -41,3 +57,44 @@ akai_assert_same( 'http errors give up at MAX_ATTEMPTS', 'give_up', $http_last['
 akai_assert_same( 'a bad response gives up immediately', 'give_up', AKAI_Queue::decide_retry( 'akai_bad_response', 1 )['action'] );
 akai_assert_same( 'a missing key gives up immediately', 'give_up', AKAI_Queue::decide_retry( 'akai_no_key', 1 )['action'] );
 akai_assert_same( 'an unknown code gives up', 'give_up', AKAI_Queue::decide_retry( 'something_else', 1 )['action'] );
+
+// --- Retry scheduling -------------------------------------------------------
+// handle_failure always runs inside the product's own action, so that action is in-progress
+// while the retry is scheduled. A retry scheduled with unchanged args and $unique = true is
+// therefore refused by Action Scheduler and silently lost: the product never gets a keyword
+// and nothing is logged. Rate limiting is the expected path on a free tier, so these cases
+// guard the plugin's core promise that a throttled run resumes on its own.
+akai_fake_scheduler_reset();
+akai_fake_scheduler_add_in_progress( AKAI_Queue::HOOK, array( 42, 1 ), AKAI_Queue::GROUP );
+$akai_now = time();
+akai_invoke_handle_failure( 42, 1, new WP_Error( 'akai_rate_limited', 'Provider rate limit reached.' ) );
+$akai_pending = akai_fake_scheduler_pending();
+
+akai_assert_same( 'a rate-limited product is rescheduled from inside its own action', 1, count( $akai_pending ) );
+akai_assert_same( 'the rate-limit retry keeps the same product', array( 42, 1 ), $akai_pending[0]['args'] ?? array() );
+akai_assert_true(
+	'the rate-limit retry waits RATE_LIMIT_DELAY',
+	isset( $akai_pending[0] )
+		&& $akai_pending[0]['timestamp'] >= $akai_now + AKAI_Queue::RATE_LIMIT_DELAY
+		&& $akai_pending[0]['timestamp'] <= $akai_now + AKAI_Queue::RATE_LIMIT_DELAY + 1
+);
+
+// The same trap applies to a transport failure, even though its args do change: the retry
+// must survive regardless of how the attempt counter happens to move.
+akai_fake_scheduler_reset();
+akai_fake_scheduler_add_in_progress( AKAI_Queue::HOOK, array( 43, 1 ), AKAI_Queue::GROUP );
+akai_invoke_handle_failure( 43, 1, new WP_Error( 'akai_http_error', 'timed out' ) );
+$akai_pending = akai_fake_scheduler_pending();
+
+akai_assert_same( 'a transport failure is rescheduled', 1, count( $akai_pending ) );
+akai_assert_same( 'the transport retry consumes an attempt', array( 43, 2 ), $akai_pending[0]['args'] ?? array() );
+
+// Giving up must schedule nothing and leave a visible record instead.
+akai_fake_scheduler_reset();
+$GLOBALS['akai_options'] = array();
+akai_fake_scheduler_add_in_progress( AKAI_Queue::HOOK, array( 44, 1 ), AKAI_Queue::GROUP );
+akai_invoke_handle_failure( 44, 1, new WP_Error( 'akai_bad_response', 'Model returned no usable primary keyword.' ) );
+
+akai_assert_same( 'giving up schedules no retry', 0, count( akai_fake_scheduler_pending() ) );
+akai_assert_same( 'giving up records the failure', 1, count( AKAI_Logger::recent_errors() ) );
+akai_assert_same( 'the recorded failure names the product', 44, AKAI_Logger::recent_errors()[0]['product_id'] ?? 0 );

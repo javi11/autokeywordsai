@@ -223,12 +223,19 @@ class AKAI_Queue {
 		$decision = self::decide_retry( $error->get_error_code(), $attempt );
 
 		if ( 'retry' === $decision['action'] ) {
+			// Not unique. This runs inside the product's own action, which Action Scheduler
+			// holds as in-progress until the callback returns, and a unique request refuses
+			// to schedule against a pending *or in-progress* match. A rate-limit retry keeps
+			// its args unchanged by design, so a unique request here matches the running
+			// action and is dropped: the product would silently never get a keyword. There is
+			// no duplicate to guard against either, since the only action with these args is
+			// the one now finishing. The enqueue paths still de-duplicate.
 			as_schedule_single_action(
 				time() + $decision['delay'],
 				self::HOOK,
 				array( $product_id, $decision['attempt'] ),
 				self::GROUP,
-				true
+				false
 			);
 			return;
 		}
