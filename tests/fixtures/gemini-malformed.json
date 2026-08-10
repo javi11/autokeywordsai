@@ -1,0 +1,10 @@
+{
+  "id": "v1_bad",
+  "status": "completed",
+  "steps": [
+    {
+      "type": "model_output",
+      "content": [ { "type": "text", "text": "Sure! Here are some keywords:" } ]
+    }
+  ]
+}

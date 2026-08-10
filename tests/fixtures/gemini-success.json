@@ -1,0 +1,13 @@
+{
+  "id": "v1_ChdpQUFvYXI",
+  "status": "completed",
+  "steps": [
+    { "type": "thought", "signature": "EvEFCu4FAQw" },
+    {
+      "type": "model_output",
+      "content": [
+        { "type": "text", "text": "{\"primary\":\"vela de lavanda\",\"secondary\":[\"vela aromática soja\",\"vela relajante\"]}" }
+      ]
+    }
+  ]
+}
