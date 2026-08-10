@@ -175,6 +175,6 @@ class AKAI_Provider_Gemini implements AKAI_Provider {
 			return new WP_Error( 'akai_bad_response', __( 'Provider response contained no model output.', 'autokeywordsai' ) );
 		}
 
-		return akai_decode_keyword_payload( $text );
+		return AKAI_Provider_Response::decode_keywords( $text );
 	}
 }

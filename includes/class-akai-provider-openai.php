@@ -168,6 +168,6 @@ class AKAI_Provider_OpenAI implements AKAI_Provider {
 			return new WP_Error( 'akai_bad_response', __( 'Provider response contained no message content.', 'autokeywordsai' ) );
 		}
 
-		return akai_decode_keyword_payload( $content );
+		return AKAI_Provider_Response::decode_keywords( $content );
 	}
 }

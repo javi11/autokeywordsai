@@ -14,7 +14,7 @@
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
-	exit; // No direct access. (tests/bootstrap.php defines ABSPATH.)
+	exit; // No direct access; tests/bootstrap.php defines ABSPATH.
 }
 
 define( 'AKAI_VERSION', '0.1.0' );
@@ -86,6 +86,7 @@ function akai_bootstrap() {
 
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-prompt.php';
 	require_once AKAI_PLUGIN_DIR . 'includes/interface-akai-provider.php';
+	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-response.php';
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-gemini.php';
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-provider-openai.php';
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-settings.php';

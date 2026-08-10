@@ -7,6 +7,7 @@
 
 require_once dirname( __DIR__ ) . '/includes/class-akai-prompt.php';
 require_once dirname( __DIR__ ) . '/includes/interface-akai-provider.php';
+require_once dirname( __DIR__ ) . '/includes/class-akai-provider-response.php';
 require_once dirname( __DIR__ ) . '/includes/class-akai-provider-gemini.php';
 
 /**
