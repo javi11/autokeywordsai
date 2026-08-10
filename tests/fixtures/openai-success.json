@@ -1,0 +1,14 @@
+{
+  "id": "chatcmpl-123",
+  "object": "chat.completion",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"primary\":\"jabón artesanal natural\",\"secondary\":[\"jabón de aceite de oliva\",\"jabón hecho a mano\"]}"
+      },
+      "finish_reason": "stop"
+    }
+  ]
+}
