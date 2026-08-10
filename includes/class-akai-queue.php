@@ -147,7 +147,7 @@ class AKAI_Queue {
 	 */
 	public static function enqueue_missing(): int {
 		$settings = AKAI_Settings::get();
-		$api_key  = AKAI_Settings::resolve_api_key( $settings, self::constant_key() );
+		$api_key  = AKAI_Settings::resolve_api_key( $settings, AKAI_Settings::constant_key() );
 
 		// Without a key every action would fail immediately, so enqueue nothing.
 		if ( '' === trim( $api_key ) ) {
@@ -191,7 +191,7 @@ class AKAI_Queue {
 		}
 
 		$settings = AKAI_Settings::get();
-		$provider = AKAI_Provider_Factory::make( $settings, self::constant_key() );
+		$provider = AKAI_Provider_Factory::make( $settings, AKAI_Settings::constant_key() );
 
 		$spec = AKAI_Prompt::build_spec(
 			self::product_context( $product_id ),
@@ -209,15 +209,6 @@ class AKAI_Queue {
 		if ( is_wp_error( $written ) ) {
 			self::handle_failure( $product_id, $attempt, $written );
 		}
-	}
-
-	/**
-	 * The AKAI_API_KEY constant value, or null when undefined.
-	 *
-	 * @return string|null
-	 */
-	private static function constant_key(): ?string {
-		return defined( 'AKAI_API_KEY' ) ? (string) constant( 'AKAI_API_KEY' ) : null;
 	}
 
 	/**

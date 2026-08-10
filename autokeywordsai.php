@@ -95,5 +95,9 @@ function akai_bootstrap() {
 	require_once AKAI_PLUGIN_DIR . 'includes/class-akai-queue.php';
 
 	AKAI_Queue::register();
+
+	if ( is_admin() ) {
+		AKAI_Settings::register_admin();
+	}
 }
 add_action( 'plugins_loaded', 'akai_bootstrap' );
