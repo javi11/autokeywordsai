@@ -1,0 +1,4 @@
+vendor/
+build/
+*.zip
+.DS_Store
