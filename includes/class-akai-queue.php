@@ -146,17 +146,15 @@ class AKAI_Queue {
 	 * @return int Number of actions scheduled.
 	 */
 	public static function enqueue_missing(): int {
-		$settings = AKAI_Settings::get();
-		$api_key  = AKAI_Settings::resolve_api_key( $settings, AKAI_Settings::constant_key() );
-
 		// Without a key every action would fail immediately, so enqueue nothing.
-		if ( '' === trim( $api_key ) ) {
+		if ( ! self::has_api_key() ) {
 			return 0;
 		}
 
-		$ids = self::missing_keyword_product_ids();
-		$now = time();
-		$rpm = (int) $settings['rpm'];
+		$settings = AKAI_Settings::get();
+		$ids      = self::missing_keyword_product_ids();
+		$now      = time();
+		$rpm      = (int) $settings['rpm'];
 
 		foreach ( $ids as $index => $product_id ) {
 			as_schedule_single_action(
@@ -209,6 +207,19 @@ class AKAI_Queue {
 		if ( is_wp_error( $written ) ) {
 			self::handle_failure( $product_id, $attempt, $written );
 		}
+	}
+
+	/**
+	 * Whether an API key is configured, from either the option or the constant.
+	 *
+	 * Both entry points check this before enqueueing: without a key every scheduled action
+	 * is doomed to fail, and the resulting errors tell the shop owner nothing useful.
+	 *
+	 * @return bool
+	 */
+	private static function has_api_key(): bool {
+		$api_key = AKAI_Settings::resolve_api_key( AKAI_Settings::get(), AKAI_Settings::constant_key() );
+		return '' !== trim( $api_key );
 	}
 
 	/**
@@ -270,6 +281,10 @@ class AKAI_Queue {
 		}
 
 		if ( ! AKAI_Keyword_Writer::should_write( get_post_meta( $post->ID, AKAI_Keyword_Writer::META_KEY, true ) ) ) {
+			return;
+		}
+
+		if ( ! self::has_api_key() ) {
 			return;
 		}
 
