@@ -1,0 +1,22 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the plugin zip
+        run: bin/build-zip.sh
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: autokeywordsai
+          path: build/autokeywordsai.zip
