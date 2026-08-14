@@ -25,6 +25,43 @@ jobs:
       - name: Run unit tests
         run: php tests/run.php
 
+  integration:
+    name: Integration tests (real WordPress, WooCommerce and Rank Math)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          coverage: none
+          tools: composer:v2
+
+      - name: Install dev dependencies
+        run: composer install --no-interaction --no-progress
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # akai_bootstrap() loads none of the plugin's classes unless both
+      # WooCommerce and Rank Math are active, so the environment carries both.
+      - name: Start WordPress, WooCommerce and Rank Math
+        run: npx --yes @wordpress/env@latest start
+
+      - name: Run the integration suite
+        run: |
+          plugin_dir="$(basename "$GITHUB_WORKSPACE")"
+          npx --yes @wordpress/env@latest run tests-cli \
+            --env-cwd="wp-content/plugins/${plugin_dir}" \
+            vendor/bin/phpunit -c phpunit.integration.xml.dist
+
+      - name: Show the WordPress debug log on failure
+        if: failure()
+        run: npx --yes @wordpress/env@latest run tests-cli cat wp-content/debug.log || true
+
   lint:
     runs-on: ubuntu-latest
     steps:

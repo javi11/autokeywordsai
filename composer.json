@@ -8,15 +8,21 @@
   },
   "require-dev": {
     "wp-coding-standards/wpcs": "^3.1",
-    "dealerdirect/phpcodesniffer-composer-installer": "^1.0"
+    "dealerdirect/phpcodesniffer-composer-installer": "^1.0",
+    "phpunit/phpunit": "^9.6",
+    "yoast/phpunit-polyfills": "^2.0"
   },
   "config": {
     "allow-plugins": {
       "dealerdirect/phpcodesniffer-composer-installer": true
+    },
+    "platform": {
+      "php": "8.1"
     }
   },
   "scripts": {
     "test": "php tests/run.php",
+    "test:integration": "phpunit -c phpunit.integration.xml.dist",
     "lint": "phpcs"
   }
 }
