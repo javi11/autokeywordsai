@@ -1,0 +1,300 @@
+name: WooCommerce compatibility
+
+# WooCommerce is not a Composer or npm dependency of this plugin — wp-env pulls
+# it as a WordPress.org zip at container start. Dependabot therefore cannot see
+# WooCommerce releases, so this polls the WordPress.org plugin API instead.
+on:
+  schedule:
+    # Daily. Stable releases only, so a once-a-day poll is enough resolution.
+    - cron: '51 6 * * *'
+  workflow_dispatch: {}
+  # Self-test: changes to this workflow are exercised on their own PR. The
+  # reporting steps below are gated off for pull_request events so a PR run can
+  # never open an issue or a PR.
+  pull_request:
+    paths:
+      - '.github/workflows/woo-compat.yml'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: woo-compat-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PLUGIN_FILE: autokeywordsai.php
+  COMPAT_LABEL: woocommerce-compat
+
+jobs:
+  compat:
+    name: Test against latest WooCommerce
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          coverage: none
+          tools: composer
+
+      - name: Install PHP dependencies
+        uses: ramsey/composer-install@v3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve latest WooCommerce and compare with our declared ceiling
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          latest="$(curl -fsSL https://api.wordpress.org/plugins/info/1.0/woocommerce.json | jq -r '.version')"
+          if [ -z "$latest" ] || [ "$latest" = "null" ]; then
+            echo "::error::Could not read the latest WooCommerce version from api.wordpress.org"
+            exit 1
+          fi
+
+          # The header is the state store: no separate state file to drift out of
+          # sync, and a passing run keeps the header honest via the bump PR.
+          tested="$(grep -m1 -oE 'WC tested up to:[[:space:]]*[0-9][0-9.]*' "$PLUGIN_FILE" \
+            | grep -oE '[0-9][0-9.]*$' || true)"
+          if [ -z "$tested" ]; then
+            echo "::error::No 'WC tested up to:' header found in $PLUGIN_FILE"
+            exit 1
+          fi
+
+          # Compare on major.minor only. WooCommerce ships patches frequently and
+          # its compatibility headers are conventionally major.minor, so comparing
+          # full versions would fire on every patch and train us to ignore this.
+          latest_minor="$(echo "$latest" | cut -d. -f1,2)"
+          tested_minor="$(echo "$tested" | cut -d. -f1,2)"
+
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "latest_minor=$latest_minor" >> "$GITHUB_OUTPUT"
+          echo "tested_minor=$tested_minor" >> "$GITHUB_OUTPUT"
+
+          if php -r 'exit(version_compare($argv[1], $argv[2], ">") ? 0 : 1);' "$latest_minor" "$tested_minor"; then
+            echo "needs_test=true" >> "$GITHUB_OUTPUT"
+            echo "WooCommerce $latest is newer than our tested ceiling $tested_minor."
+          else
+            echo "needs_test=false" >> "$GITHUB_OUTPUT"
+            echo "WooCommerce $latest is not newer than our tested ceiling $tested_minor. Nothing to do."
+          fi
+
+      - name: Pin that WooCommerce release in a wp-env override
+        if: steps.resolve.outputs.needs_test == 'true'
+        env:
+          LATEST: ${{ steps.resolve.outputs.latest }}
+        run: |
+          set -euo pipefail
+
+          # wp-env does NOT merge `plugins` from an override file — setting it
+          # replaces the base array wholesale. So rewrite only the WooCommerce
+          # entry inside each existing array. Writing a fresh array would silently
+          # drop "." (this plugin) and the run would prove nothing.
+          #
+          # Both the top-level `plugins` and any per-environment `env.*.plugins`
+          # are pinned. This repo currently defines no `env` key, so the tests
+          # environment inherits the top-level array — but a future `env.tests`
+          # holding its own WooCommerce entry would otherwise silently run the
+          # suite against an unpinned version.
+          jq --arg url "https://downloads.wordpress.org/plugin/woocommerce.${LATEST}.zip" '
+            def pin: map(if type == "string" and test("/woocommerce\\.") then $url else . end);
+            (.plugins |= pin)
+            | if has("env") then
+                .env |= with_entries(
+                  if (.value | type == "object") and (.value | has("plugins"))
+                  then .value.plugins |= pin
+                  else .
+                  end
+                )
+              else . end
+          ' .wp-env.json > .wp-env.override.json
+
+          if ! grep -q "woocommerce.${LATEST}.zip" .wp-env.override.json; then
+            echo "::error::No WooCommerce entry found in .wp-env.json — the override would not pin anything."
+            exit 1
+          fi
+
+          # Any surviving unpinned WooCommerce reference means some plugins array
+          # was missed, and the suite would silently test the wrong version.
+          if grep -oE 'plugin/woocommerce\.[^"]*' .wp-env.override.json \
+            | grep -v "woocommerce.${LATEST}.zip"; then
+            echo "::error::The override still references an unpinned WooCommerce zip (listed above)."
+            exit 1
+          fi
+
+          cat .wp-env.override.json
+
+      - name: Start WordPress and WooCommerce
+        if: steps.resolve.outputs.needs_test == 'true'
+        run: npx --yes @wordpress/env@latest start
+
+      - name: Confirm the pinned WooCommerce is what actually got installed
+        if: steps.resolve.outputs.needs_test == 'true'
+        env:
+          LATEST: ${{ steps.resolve.outputs.latest }}
+        run: |
+          set -euo pipefail
+
+          # Verify against the running container rather than trusting the config.
+          # This is the only step that proves the version under test.
+          installed="$(npx --yes @wordpress/env@latest run tests-cli wp plugin get woocommerce --field=version 2>/dev/null \
+            | tr -d '\r' | tail -n 1)"
+          echo "WooCommerce installed in the tests environment: '$installed' (expected '$LATEST')"
+
+          if [ "$installed" != "$LATEST" ]; then
+            echo "::error::The tests environment is running WooCommerce '$installed', not the pinned '$LATEST'."
+            exit 1
+          fi
+
+      - name: Run integration tests
+        id: tests
+        if: steps.resolve.outputs.needs_test == 'true'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+
+          # No storage engine matrix here, unlike the order-based plugins:
+          # WooCommerce's High-Performance Order Storage moved orders only, and
+          # this plugin touches products, which remain ordinary custom post types.
+          plugin_dir="$(basename "$GITHUB_WORKSPACE")"
+
+          npx --yes @wordpress/env@latest run tests-cli \
+            --env-cwd="wp-content/plugins/${plugin_dir}" \
+            vendor/bin/phpunit -c phpunit.integration.xml.dist 2>&1 \
+            | tee phpunit-output.txt
+
+      - name: Collect the WordPress debug log
+        if: steps.resolve.outputs.needs_test == 'true'
+        run: |
+          npx --yes @wordpress/env@latest run tests-cli cat wp-content/debug.log > debug-log.txt 2>&1 || true
+          tail -c 20000 debug-log.txt || true
+
+      - name: Upload test output
+        if: steps.resolve.outputs.needs_test == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: woo-compat-output
+          path: |
+            phpunit-output.txt
+            debug-log.txt
+          if-no-files-found: warn
+
+      - name: Open an issue on failure
+        if: |
+          github.event_name != 'pull_request' &&
+          steps.resolve.outputs.needs_test == 'true' &&
+          steps.tests.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.resolve.outputs.latest }}
+          LATEST_MINOR: ${{ steps.resolve.outputs.latest_minor }}
+          TESTED_MINOR: ${{ steps.resolve.outputs.tested_minor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          title="WooCommerce ${LATEST_MINOR} compatibility failure"
+
+          # The label does not exist in a fresh repo and `gh issue create --label`
+          # hard-fails on an unknown label.
+          gh label create "$COMPAT_LABEL" \
+            --color B22222 \
+            --description "Integration tests fail against a newer WooCommerce release" \
+            || true
+
+          # Dedup: without this a broken release files one issue per day forever.
+          existing="$(gh issue list --state open --label "$COMPAT_LABEL" --json number,title \
+            | jq --arg t "$title" '[.[] | select(.title == $t)] | length')"
+          if [ "$existing" -gt 0 ]; then
+            echo "An open issue titled \"$title\" already exists. Not filing another."
+            exit 0
+          fi
+
+          {
+            echo "The integration suite fails against WooCommerce \`${LATEST}\`."
+            echo
+            echo "- Declared ceiling: \`WC tested up to: ${TESTED_MINOR}\`"
+            echo "- Failing release: \`${LATEST}\`"
+            echo "- Run: ${RUN_URL}"
+            echo
+            echo "PHPUnit output:"
+            echo
+            echo '```'
+            tail -c 40000 phpunit-output.txt
+            echo '```'
+            echo
+            echo "<details><summary>WordPress debug log</summary>"
+            echo
+            echo '```'
+            tail -c 20000 debug-log.txt || echo "(empty)"
+            echo '```'
+            echo
+            echo "</details>"
+          } > issue-body.md
+
+          gh issue create \
+            --title "$title" \
+            --label "$COMPAT_LABEL" \
+            --assignee javi11 \
+            --body-file issue-body.md
+
+      - name: Open a header-bump PR on success
+        if: |
+          github.event_name != 'pull_request' &&
+          steps.resolve.outputs.needs_test == 'true' &&
+          steps.tests.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.resolve.outputs.latest }}
+          LATEST_MINOR: ${{ steps.resolve.outputs.latest_minor }}
+          TESTED_MINOR: ${{ steps.resolve.outputs.tested_minor }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          branch="chore/wc-tested-up-to-${LATEST_MINOR}"
+          title="chore: declare compatibility with WooCommerce ${LATEST_MINOR}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch -c "$branch"
+
+          sed -i -E "s/(WC tested up to:[[:space:]]*)[0-9][0-9.]*/\1${LATEST_MINOR}/" "$PLUGIN_FILE"
+
+          if git diff --quiet; then
+            echo "::error::The header bump produced no change — the sed pattern did not match $PLUGIN_FILE."
+            exit 1
+          fi
+
+          git commit -am "$title"
+          # Force-with-lease so a re-run after an amended branch is not a hard failure.
+          git push --force-with-lease -u origin "$branch"
+
+          open_prs="$(gh pr list --state open --head "$branch" --json number | jq 'length')"
+          if [ "$open_prs" -gt 0 ]; then
+            echo "A PR for $branch is already open."
+            exit 0
+          fi
+
+          gh pr create \
+            --title "$title" \
+            --base main \
+            --head "$branch" \
+            --body "$(printf '%s\n' \
+              "The integration suite passes against WooCommerce \`${LATEST}\`." \
+              "" \
+              "This bumps the declared ceiling from \`${TESTED_MINOR}\` to \`${LATEST_MINOR}\`." \
+              "" \
+              "Run: ${RUN_URL}" \
+              "" \
+              "Note: this PR was created by \`GITHUB_TOKEN\`, so \`ci.yml\` does not run on it. The compat run above already exercised the integration suite against this WooCommerce release.")"

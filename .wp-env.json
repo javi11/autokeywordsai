@@ -1,0 +1,14 @@
+{
+	"plugins": [
+		".",
+		"https://downloads.wordpress.org/plugin/woocommerce.latest-stable.zip",
+		"https://downloads.wordpress.org/plugin/seo-by-rank-math.latest-stable.zip"
+	],
+	"port": 8903,
+	"testsPort": 8904,
+	"config": {
+		"WP_DEBUG": true,
+		"WP_DEBUG_DISPLAY": false,
+		"SCRIPT_DEBUG": false
+	}
+}
